@@ -1,0 +1,130 @@
+
+---
+title: "Annotated scRNA-seq Tutorial Using Seurat"
+author: "Anushka Deshmukh"
+output: html_document
+---
+
+# Overview
+
+This document contains my personal walkthrough and annotated notes based on the guided Seurat single-cell RNA-seq tutorial from MMG3003Y. The dataset is a downsampled version of the SEA-AD study (Seattle Alzheimer’s Disease Brain Cell Atlas), focusing on the middle temporal gyrus. My goal here was to understand how to perform quality control, dimensionality reduction, clustering, and marker analysis using Seurat, and reflect on key takeaways from the pipeline.
+
+---
+
+# Introduction to Seurat & Data Setup
+
+```{r, message=FALSE}
+library(Seurat)
+library(tidyverse)
+library(ggplot2)
+
+# Load Seurat object (downsampled SEA-AD)
+ad_data <- readRDS("sea_ad_downsampled.rds")
+ad_data
+```
+
+We begin by examining the metadata and number of cells/donors. I found it useful to explore the Seurat object structure using `@meta.data` and `@assays`.
+
+---
+
+# Quality Control & Preprocessing
+
+```{r}
+# Add mitochondrial percentage
+ad_data[["percent.mt"]] <- PercentageFeatureSet(ad_data, pattern = "^MT-")
+
+# Violin plot for basic QC metrics
+VlnPlot(ad_data,
+        features = c("nFeature_originalexp", "nCount_originalexp", "percent.mt"),
+        group.by = "Cognitive.Status")
+
+# Save violin plot to PNG
+qc_violin <- VlnPlot(ad_data,
+                     features = c("nFeature_originalexp", "nCount_originalexp", "percent.mt"),
+                     group.by = "Cognitive.Status")
+
+ggsave("sc_violin_qc.png", plot = qc_violin, width = 10, height = 5)
+
+```
+
+**My reflection:** This QC step helped me understand how outlier cells (e.g., low gene count or high mitochondrial expression) can distort downstream analysis.
+
+---
+
+# Normalization and Highly Variable Genes
+
+```{r}
+# Normalize with SCTransform
+ad_data <- SCTransform(ad_data,
+                       assay = "originalexp",
+                       vars.to.regress = "percent.mt",
+                       variable.features.n = 3000,
+                       seed.use = 123)
+```
+
+This step was new to me. `SCTransform` seems more robust than simple log-normalization and adjusts for sequencing depth and technical variability.
+
+---
+
+# Dimensionality Reduction and Clustering
+
+```{r}
+# PCA + Elbow plot
+ad_data <- RunPCA(ad_data, npcs = 50)
+ElbowPlot(ad_data)
+
+# UMAP
+ad_data <- RunUMAP(ad_data, dims = 1:30)
+ad_data <- FindNeighbors(ad_data, dims = 1:30)
+ad_data <- FindClusters(ad_data, resolution = 0.8)
+
+#Save the UMAP Plot
+umap_clusters <- DimPlot(ad_data, group.by = "seurat_clusters", label = TRUE, repel = TRUE)
+ggsave("umap_clusters.png", plot = umap_clusters, width = 10, height = 6)
+
+```
+
+I used the ElbowPlot to decide how many PCs to retain—typically somewhere in the 10–20 range seemed sufficient. I liked how UMAP visualizes cell clusters in an intuitive way.
+
+---
+
+# Cell Type Annotation
+
+```{r}
+# Find top markers for cluster 1
+cluster1_markers <- FindMarkers(ad_data, ident.1 = 1,
+                                logfc.threshold = 0.25,
+                                min.pct = 0.50)
+head(cluster1_markers)
+```
+
+I cross-referenced the top markers with ProteinAtlas to guess cell identity. This gave me insight into manual cell annotation strategies.
+
+---
+
+# Visualizing Gene Expression
+
+```{r}
+# Violin plot + FeaturePlot
+top10 <- head(VariableFeatures(ad_data), 10)
+VlnPlot(ad_data, features = top10)
+FeaturePlot(ad_data, features = top10)
+
+# Save the feature plot
+top10 <- head(VariableFeatures(ad_data), 10)
+feature_plot <- FeaturePlot(ad_data, features = top10)
+ggsave("feature_plot_top10.png", plot = feature_plot, width = 12, height = 6)
+
+```
+
+These visualizations really helped me understand how genes are distributed across clusters.
+
+---
+
+# Conclusion
+
+This Seurat pipeline simplified many parts of the scRNA-seq analysis process for me. I still need to explore pseudobulk differential expression and integration methods, but I now feel much more confident interpreting Seurat objects and performing core analyses.
+
+---
+
+*Note: This tutorial reflects my own understanding and annotations from course-guided materials. No TA-authored content or original Rmd files are included.*
